@@ -279,6 +279,10 @@ with tab2:
                     status_text = st.empty()
                     
                     tickers = df_upload[ticker_col].dropna().astype(str).str.strip().str.upper().tolist()
+                    
+                    # Filter out non-ticker values
+                    tickers = [t for t in tickers if t and t.lower() not in ['total', 'sum', 'n/a', 'na', '']]
+                    
                     total = len(tickers)
                     added = 0
                     failed = []
@@ -301,8 +305,16 @@ with tab2:
                         else:
                             detected_exchange = detect_exchange_from_ticker(ticker)
                         
-                        # Fetch price
+                        # Try to fetch price - first attempt with original ticker
                         price = fetch_stock_price(ticker)
+                        
+                        # If failed and no suffix, try adding .TO for Canadian stocks
+                        if not price and '.' not in ticker and detected_exchange == 'TSX':
+                            ticker_with_suffix = f"{ticker}.TO"
+                            status_text.text(f"Retrying {ticker} as {ticker_with_suffix}... ({i+1}/{total})")
+                            price = fetch_stock_price(ticker_with_suffix)
+                            if price:
+                                ticker = ticker_with_suffix  # Use the version that worked
                         
                         if price:
                             st.session_state.holdings.append({
@@ -320,10 +332,18 @@ with tab2:
                     progress_bar.empty()
                     
                     if added > 0:
-                        st.success(f"✅ Successfully imported {added} stocks!")
+                        st.success(f"✅ Successfully imported {added}/{total} stocks!")
                     
                     if failed:
-                        st.warning(f"⚠️ Failed to fetch prices for: {', '.join(failed)}")
+                        with st.expander(f"⚠️ Failed to fetch prices for {len(failed)} tickers - Click to see details"):
+                            st.write("These tickers could not be found. They may be:")
+                            st.write("- Delisted or invalid ticker symbols")
+                            st.write("- Require a different exchange suffix")
+                            st.write("- Not available on Yahoo Finance")
+                            st.write("")
+                            st.write("**Failed tickers:**")
+                            for fail_ticker in failed:
+                                st.write(f"- {fail_ticker}")
                     
                     st.rerun()
             else:
