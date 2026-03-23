@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-import yfinance as yf
 from datetime import date
 import io
+import requests
 
 st.set_page_config(
     page_title="Portfolio Calculator",
@@ -69,19 +69,36 @@ EXCHANGE_MAP = {
 }
 
 def fetch_stock_price(ticker):
-    """Fetch current stock price using yfinance"""
+    """Fetch current stock price using Yahoo Finance API"""
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        # Using Yahoo Finance query API
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
         
-        # Try different price fields
-        price = info.get('regularMarketPrice') or info.get('currentPrice') or info.get('previousClose')
+        response = requests.get(url, headers=headers, timeout=10)
         
-        if price:
-            return float(price)
+        if response.status_code == 200:
+            data = response.json()
+            
+            if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
+                result = data['chart']['result'][0]
+                
+                # Try to get the regular market price
+                if 'meta' in result and 'regularMarketPrice' in result['meta']:
+                    price = result['meta']['regularMarketPrice']
+                    return float(price)
+                
+                # Fallback to previous close
+                if 'meta' in result and 'previousClose' in result['meta']:
+                    price = result['meta']['previousClose']
+                    return float(price)
+        
         return None
+        
     except Exception as e:
-        st.error(f"Error fetching {ticker}: {str(e)}")
+        st.warning(f"⚠️ Error fetching {ticker}: {str(e)}")
         return None
 
 # Header
@@ -143,7 +160,7 @@ with col3:
                     st.success(f"✅ Added {new_ticker} at ${price:.2f}")
                     st.rerun()
                 else:
-                    st.error(f"❌ Unable to fetch price for {new_ticker}")
+                    st.error(f"❌ Unable to fetch price for {new_ticker}. Please check the ticker symbol.")
         else:
             st.warning("⚠️ Please enter a ticker symbol")
 
@@ -200,11 +217,13 @@ if st.session_state.holdings:
     with col1:
         if st.button("🔄 Refresh All Prices", use_container_width=True):
             with st.spinner('Refreshing prices...'):
+                updated = 0
                 for holding in st.session_state.holdings:
                     new_price = fetch_stock_price(holding['ticker'])
                     if new_price:
                         holding['price'] = new_price
-                st.success("✅ Prices refreshed!")
+                        updated += 1
+                st.success(f"✅ Refreshed {updated}/{len(st.session_state.holdings)} prices!")
                 st.rerun()
     
     with col2:
@@ -261,6 +280,7 @@ else:
 st.divider()
 st.markdown("""
 <div style='text-align: center; color: #8892b0; padding: 1rem;'>
-    <small>💡 Tip: Make sure tickers are entered correctly (e.g., AAPL for Apple, MSFT for Microsoft)</small>
+    <small>💡 Tip: Make sure tickers are entered correctly (e.g., AAPL for Apple, MSFT for Microsoft)</small><br>
+    <small>📍 For Canadian stocks on TSX, use .TO suffix (e.g., SHOP.TO)</small>
 </div>
 """, unsafe_allow_html=True)
