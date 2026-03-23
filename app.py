@@ -235,9 +235,9 @@ with tab2:
     st.divider()
     
     uploaded_file = st.file_uploader(
-        "Choose a CSV or Excel file",
+        "Choose a CSV file (or Excel if openpyxl is installed)",
         type=['csv', 'xlsx', 'xls'],
-        help="Upload a file with ticker symbols"
+        help="CSV format is recommended for best compatibility"
     )
     
     if uploaded_file is not None:
@@ -246,7 +246,13 @@ with tab2:
             if uploaded_file.name.endswith('.csv'):
                 df_upload = pd.read_csv(uploaded_file)
             else:
-                df_upload = pd.read_excel(uploaded_file)
+                # Try to read Excel file
+                try:
+                    df_upload = pd.read_excel(uploaded_file)
+                except ImportError:
+                    st.error("❌ Excel file support requires 'openpyxl' library. Please upload a CSV file instead, or contact your admin to add 'openpyxl' to requirements.txt")
+                    st.info("💡 You can convert your Excel file to CSV in Excel: File → Save As → CSV")
+                    st.stop()
             
             st.write("**Preview of uploaded file:**")
             st.dataframe(df_upload.head(), use_container_width=True)
