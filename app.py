@@ -101,6 +101,39 @@ def fetch_stock_price(ticker):
         st.warning(f"⚠️ Error fetching {ticker}: {str(e)}")
         return None
 
+def detect_exchange_from_ticker(ticker):
+    """Auto-detect exchange based on ticker suffix or common patterns"""
+    ticker_upper = ticker.upper()
+    
+    # Canadian stocks (TSX)
+    if ticker_upper.endswith('.TO') or ticker_upper.endswith('.V'):
+        return 'TSX'
+    
+    # UK stocks (LSE)
+    if ticker_upper.endswith('.L'):
+        return 'LSE'
+    
+    # Japanese stocks (TSE)
+    if ticker_upper.endswith('.T'):
+        return 'TSE'
+    
+    # Australian stocks (ASX)
+    if ticker_upper.endswith('.AX'):
+        return 'ASX'
+    
+    # European stocks
+    if ticker_upper.endswith('.AS') or ticker_upper.endswith('.PA'):
+        return 'Euronext'
+    
+    # Default to NASDAQ for US stocks without suffix
+    # You can also check if it's a known NYSE stock
+    nyse_indicators = ['^', 'BRK.', 'BRK-']
+    for indicator in nyse_indicators:
+        if indicator in ticker_upper:
+            return 'NYSE'
+    
+    return 'NASDAQ'
+
 # Header
 st.title("📊 PORTFOLIO CALCULATOR")
 st.markdown("**Auto-fetch prices • Equal weighting • Export ready**")
@@ -132,13 +165,18 @@ st.header("📈 Add Holdings")
 col1, col2, col3 = st.columns([2, 2, 1])
 
 with col1:
-    new_ticker = st.text_input("Stock Ticker", placeholder="e.g., AAPL, MSFT, SHOP", key="new_ticker").upper()
+    new_ticker = st.text_input("Stock Ticker", placeholder="e.g., AAPL, MSFT, SHOP.TO", key="new_ticker").upper()
 
 with col2:
+    # Auto-detect exchange based on ticker
+    auto_exchange = detect_exchange_from_ticker(new_ticker) if new_ticker else 'NASDAQ'
+    
     new_exchange = st.selectbox(
-        "Exchange",
+        "Exchange (Auto-detected)",
         options=list(EXCHANGE_MAP.keys()),
-        key="new_exchange"
+        index=list(EXCHANGE_MAP.keys()).index(auto_exchange),
+        key="new_exchange",
+        help="Exchange is automatically detected from ticker suffix. You can change it if needed."
     )
 
 with col3:
@@ -232,16 +270,10 @@ if st.session_state.holdings:
         for holding in st.session_state.holdings:
             shares = int(value_per_holding / holding['price']) if holding['price'] > 0 else 0
             csv_data.append({
-                'Date': transaction_date.strftime('%Y-%m-%d'),
-                'Type': 'buy',
-                'Figi': '',
                 'Ticker': holding['ticker'],
-                'MIC': holding['mic'],
                 'Listing Country': holding['country'],
                 'Shares': shares,
-                'Cost Basis': f"{holding['price']:.2f}",
-                'Exchange Rate': '',
-                'Affect Cash': 'true'
+                'Cost Basis': f"{holding['price']:.2f}"
             })
         
         df_export = pd.DataFrame(csv_data)
