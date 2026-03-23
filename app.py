@@ -162,45 +162,169 @@ st.divider()
 # Holdings Input Section
 st.header("📈 Add Holdings")
 
-col1, col2, col3 = st.columns([2, 2, 1])
+# Add tabs for manual entry vs bulk upload
+tab1, tab2 = st.tabs(["➕ Add Manually", "📂 Bulk Upload"])
 
-with col1:
-    new_ticker = st.text_input("Stock Ticker", placeholder="e.g., AAPL, MSFT, SHOP.TO", key="new_ticker").upper()
+with tab1:
+    col1, col2, col3 = st.columns([2, 2, 1])
 
-with col2:
-    # Auto-detect exchange based on ticker
-    auto_exchange = detect_exchange_from_ticker(new_ticker) if new_ticker else 'NASDAQ'
+    with col1:
+        new_ticker = st.text_input("Stock Ticker", placeholder="e.g., AAPL, MSFT, SHOP.TO", key="new_ticker").upper()
+
+    with col2:
+        # Auto-detect exchange based on ticker
+        auto_exchange = detect_exchange_from_ticker(new_ticker) if new_ticker else 'NASDAQ'
+        
+        new_exchange = st.selectbox(
+            "Exchange (Auto-detected)",
+            options=list(EXCHANGE_MAP.keys()),
+            index=list(EXCHANGE_MAP.keys()).index(auto_exchange),
+            key="new_exchange",
+            help="Exchange is automatically detected from ticker suffix. You can change it if needed."
+        )
+
+    with col3:
+        st.write("")  # Spacing
+        st.write("")  # Spacing
+        if st.button("➕ Add Stock", use_container_width=True):
+            if new_ticker:
+                with st.spinner(f'Fetching price for {new_ticker}...'):
+                    price = fetch_stock_price(new_ticker)
+                    
+                    if price:
+                        st.session_state.holdings.append({
+                            'ticker': new_ticker,
+                            'exchange': new_exchange,
+                            'country': EXCHANGE_MAP[new_exchange]['country'],
+                            'mic': EXCHANGE_MAP[new_exchange]['mic'],
+                            'price': price
+                        })
+                        st.success(f"✅ Added {new_ticker} at ${price:.2f}")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Unable to fetch price for {new_ticker}. Please check the ticker symbol.")
+            else:
+                st.warning("⚠️ Please enter a ticker symbol")
+
+with tab2:
+    st.markdown("""
+    **Upload a CSV or Excel file with your tickers**
     
-    new_exchange = st.selectbox(
-        "Exchange (Auto-detected)",
-        options=list(EXCHANGE_MAP.keys()),
-        index=list(EXCHANGE_MAP.keys()).index(auto_exchange),
-        key="new_exchange",
-        help="Exchange is automatically detected from ticker suffix. You can change it if needed."
+    Your file should have at least one column with ticker symbols. 
+    
+    Supported column names: `Ticker`, `Symbol`, `Stock`, `ticker`, `symbol`, `stock`
+    
+    Optional: You can also include `Exchange` or `Country` columns.
+    """)
+    
+    # Provide sample template download
+    sample_data = pd.DataFrame({
+        'Ticker': ['AAPL', 'MSFT', 'GOOGL', 'SHOP.TO', 'TSLA'],
+        'Exchange': ['NASDAQ', 'NASDAQ', 'NASDAQ', 'TSX', 'NASDAQ']
+    })
+    
+    csv_sample = sample_data.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Sample Template",
+        data=csv_sample,
+        file_name="ticker_template.csv",
+        mime="text/csv",
+        help="Download a sample CSV template to see the expected format"
     )
-
-with col3:
-    st.write("")  # Spacing
-    st.write("")  # Spacing
-    if st.button("➕ Add Stock", use_container_width=True):
-        if new_ticker:
-            with st.spinner(f'Fetching price for {new_ticker}...'):
-                price = fetch_stock_price(new_ticker)
+    
+    st.divider()
+    
+    uploaded_file = st.file_uploader(
+        "Choose a CSV or Excel file",
+        type=['csv', 'xlsx', 'xls'],
+        help="Upload a file with ticker symbols"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Read the file
+            if uploaded_file.name.endswith('.csv'):
+                df_upload = pd.read_csv(uploaded_file)
+            else:
+                df_upload = pd.read_excel(uploaded_file)
+            
+            st.write("**Preview of uploaded file:**")
+            st.dataframe(df_upload.head(), use_container_width=True)
+            
+            # Find the ticker column
+            ticker_col = None
+            for col in df_upload.columns:
+                if col.lower() in ['ticker', 'symbol', 'stock', 'tickers']:
+                    ticker_col = col
+                    break
+            
+            if ticker_col:
+                st.success(f"✅ Found ticker column: **{ticker_col}**")
                 
-                if price:
-                    st.session_state.holdings.append({
-                        'ticker': new_ticker,
-                        'exchange': new_exchange,
-                        'country': EXCHANGE_MAP[new_exchange]['country'],
-                        'mic': EXCHANGE_MAP[new_exchange]['mic'],
-                        'price': price
-                    })
-                    st.success(f"✅ Added {new_ticker} at ${price:.2f}")
+                # Check for exchange column
+                exchange_col = None
+                for col in df_upload.columns:
+                    if col.lower() in ['exchange', 'market', 'exchanges']:
+                        exchange_col = col
+                        break
+                
+                if st.button("🚀 Import All Tickers", use_container_width=True):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    tickers = df_upload[ticker_col].dropna().astype(str).str.strip().str.upper().tolist()
+                    total = len(tickers)
+                    added = 0
+                    failed = []
+                    
+                    for i, ticker in enumerate(tickers):
+                        status_text.text(f"Processing {ticker}... ({i+1}/{total})")
+                        progress_bar.progress((i + 1) / total)
+                        
+                        # Skip if already in holdings
+                        if any(h['ticker'] == ticker for h in st.session_state.holdings):
+                            continue
+                        
+                        # Detect exchange
+                        if exchange_col and i < len(df_upload):
+                            exchange = df_upload.iloc[i][exchange_col]
+                            if pd.notna(exchange) and exchange in EXCHANGE_MAP:
+                                detected_exchange = exchange
+                            else:
+                                detected_exchange = detect_exchange_from_ticker(ticker)
+                        else:
+                            detected_exchange = detect_exchange_from_ticker(ticker)
+                        
+                        # Fetch price
+                        price = fetch_stock_price(ticker)
+                        
+                        if price:
+                            st.session_state.holdings.append({
+                                'ticker': ticker,
+                                'exchange': detected_exchange,
+                                'country': EXCHANGE_MAP[detected_exchange]['country'],
+                                'mic': EXCHANGE_MAP[detected_exchange]['mic'],
+                                'price': price
+                            })
+                            added += 1
+                        else:
+                            failed.append(ticker)
+                    
+                    status_text.empty()
+                    progress_bar.empty()
+                    
+                    if added > 0:
+                        st.success(f"✅ Successfully imported {added} stocks!")
+                    
+                    if failed:
+                        st.warning(f"⚠️ Failed to fetch prices for: {', '.join(failed)}")
+                    
                     st.rerun()
-                else:
-                    st.error(f"❌ Unable to fetch price for {new_ticker}. Please check the ticker symbol.")
-        else:
-            st.warning("⚠️ Please enter a ticker symbol")
+            else:
+                st.error("❌ Could not find a ticker column. Please make sure your file has a column named 'Ticker', 'Symbol', or 'Stock'.")
+                
+        except Exception as e:
+            st.error(f"❌ Error reading file: {str(e)}")
 
 st.divider()
 
